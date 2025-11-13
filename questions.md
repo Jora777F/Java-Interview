@@ -1136,13 +1136,20 @@ sum(rate(http_server_requests_seconds_count[5m])) * 100
 ---
 
 ## Вопрос №20.
+В системе обработки заказов используется Kafka. Продюсер
+публикует сообщения в топик orders, а несколько консьюмеров
+читают их в одной группе. Как будут распределяться сообщения?
+1) Сообщения будут разделены между консьюмерами группы по партициям.
+2) Каждый консьюмер получит все сообщения из топика
+3) Первому консьюмеру уйдут все сообщения, остальные будут в standby
+4) Сообщения всегда распределяются случайным образом между консьюмерами
 
 
-**Ответ: Сообщения будут разделены между консьюмерами группы по партициям**
+> **Ответ: Сообщения будут разделены между консьюмерами группы по партициям**
 
 Когда несколько консьюмеров находятся в **одной consumer group**, Kafka **распределяет партиции** между ними. Каждое сообщение обрабатывается **только одним консьюмером** из группы.
 
-## Как работает:
+### Как работает:
 
 ```
 Топик orders: 3 партиции
@@ -1165,14 +1172,14 @@ Consumer Group "order-processors": 3 консьюмера
 └─────────────┘
 ```
 
-## Ключевые моменты:
+### Ключевые моменты:
 
 1. **Одна партиция = один консьюмер** (в рамках группы)
 2. **Один консьюмер может читать несколько партиций**
 3. **Каждое сообщение обрабатывается только один раз** в группе
 4. **Балансировка автоматическая** (при добавлении/удалении консьюмеров)
 
-## Пример конфигурации:
+### Пример конфигурации:
 
 ```java
 Properties props = new Properties();
@@ -1184,7 +1191,7 @@ KafkaConsumer<String, String> consumer = new KafkaConsumer<>(props);
 consumer.subscribe(Arrays.asList("orders"));
 ```
 
-## Почему не другие варианты:
+### Почему не другие варианты:
 
 - **"Каждый консьюмер получит все сообщения"** - это если консьюмеры в **разных группах**
 - **"Первому уйдут все, остальные standby"** - нет, партиции распределяются равномерно
@@ -1192,42 +1199,20 @@ consumer.subscribe(Arrays.asList("orders"));
 
 **Consumer Group = распределение партиций между консьюмерами для параллельной обработки.**
 
-```plaintext
-Топик orders: 3 партиции
-Consumer Group "order-processors": 3 консьюмера
+## Вопрос №21.
+Команда разработчиков создала класс OrderManager, в котором содержатся
+и бизнес-правила заказа, и логика сохранения в БД, и REST-контроллер. Почему это
+нарушает принципы SOLID?
+1) Нарушается Dependency Inversion, так как класс зависит от БД
+2) Нарушается Open/Closed - класс невозможно расширить
+3) Нарушается Single Responsibility -один класс выполняет несколько обязанностей
+4) Нарушается Interface Segregation - слишком много методов
 
-Распределение:
-┌─────────────┐
-│ Партиция 0  │ → Консьюмер 1
-│ msg1, msg4  │
-└─────────────┘
-
-┌─────────────┐
-│ Партиция 1  │ → Консьюмер 2
-│ msg2, msg5  │
-└─────────────┘
-
-┌─────────────┐
-│ Партиция 2  │ → Консьюмер 3
-│ msg3, msg6  │
-└─────────────┘
-```
-
-```java
-Properties props = new Properties();
-props.put("bootstrap.servers", "localhost:9092");
-props.put("group.id", "order-processors");  // Одна группа
-props.put("enable.auto.commit", "true");
-
-KafkaConsumer<String, String> consumer = new KafkaConsumer<>(props);
-consumer.subscribe(Arrays.asList("orders"));
-```
-
-**Ответ: Нарушается Single Responsibility — один класс выполняет несколько обязанностей**
+> **Ответ: Нарушается Single Responsibility — один класс выполняет несколько обязанностей**
 
 Класс `OrderManager` выполняет **слишком много разных задач**, что нарушает принцип **Single Responsibility Principle (SRP)** из SOLID.
 
-## Проблема:
+### Проблема:
 
 ```java
 class OrderManager {
@@ -1251,7 +1236,7 @@ class OrderManager {
 2. Изменение способа хранения (БД → NoSQL)
 3. Изменение API (REST → GraphQL)
 
-## Правильное разделение (SRP):
+### Правильное разделение (SRP):
 
 ```java
 // Бизнес-логика
@@ -1291,58 +1276,20 @@ class OrderController {
 
 **SRP = одна причина для изменения. `OrderManager` имеет 3 причины → нарушение SRP.**
 
-```java
-class OrderManager {
-    // Бизнес-логика заказа
-    public void calculateTotal(Order order) { ... }
-    public void applyDiscount(Order order) { ... }
-    
-    // Сохранение в БД
-    public void saveOrder(Order order) { 
-        // SQL, транзакции, маппинг
-    }
-    
-    // REST-контроллер
-    @PostMapping("/orders")
-    public ResponseEntity<Order> createOrder(@RequestBody Order order) { ... }
-}
-```
+---
 
-```java
-// Бизнес-логика
-@Service
-class OrderService {
-    public void calculateTotal(Order order) { ... }
-    public void applyDiscount(Order order) { ... }
-}
+## Вопрос №22.
+Какое утверждение корректное о `-XX:+UseZGC` в Java 11+?
+1) ZGC недоступен в Linux и работает только в Windows
+2) ZGC минимизирует паузы (обычно < 10мс), но требует больше памяти
+3) ZGC всегда медленнее G1GC
+4) ZGC работает только в single-thread режиме
 
-// Сохранение в БД
-@Repository
-class OrderRepository {
-    public void save(Order order) { ... }
-    public Order findById(Long id) { ... }
-}
-
-// REST API
-@RestController
-class OrderController {
-    private final OrderService orderService;
-    private final OrderRepository orderRepository;
-    
-    @PostMapping("/orders")
-    public ResponseEntity<Order> createOrder(@RequestBody Order order) {
-        orderService.calculateTotal(order);
-        orderRepository.save(order);
-        return ResponseEntity.ok(order);
-    }
-}
-```
-
-**Ответ: ZGC минимизирует паузы (обычно <10мс), но требует больше памяти**
+> **Ответ: ZGC минимизирует паузы (обычно <10мс), но требует больше памяти**
 
 **ZGC (Z Garbage Collector)** — это low-latency сборщик мусора, появившийся в Java 11, оптимизированный для **минимальных пауз** приложения.
 
-## Ключевые характеристики ZGC:
+### Ключевые характеристики ZGC:
 
 ### ✅ Преимущества:
 - **Паузы <10мс** (обычно 1-5мс), независимо от размера heap
@@ -1365,14 +1312,14 @@ java -XX:+UnlockExperimentalVMOptions -XX:+UseZGC -Xmx16g MyApp
 java -XX:+UseZGC -Xmx16g MyApp
 ```
 
-## Когда использовать ZGC:
+### Когда использовать ZGC:
 
 - **Нужны предсказуемые низкие паузы** (latency-sensitive приложения)
 - Real-time системы, торговые платформы
 - Веб-сервисы с SLA на response time
 - Большие heap (>100GB)
 
-## Сравнение с другими GC:
+### Сравнение с другими GC:
 
 | GC | Паузы | Throughput | Память |
 |----|-------|------------|--------|
@@ -1381,7 +1328,7 @@ java -XX:+UseZGC -Xmx16g MyApp
 | **Parallel** | 100ms+ | Очень высокий | Низкая |
 | **Shenandoah** | <10ms | Средний | Высокая |
 
-## Почему не другие варианты:
+### Почему не другие варианты:
 
 - **"Недоступен в Linux"** - работает на всех основных ОС
 - **"Всегда медленнее G1GC"** - нет, паузы короче, но throughput ниже
@@ -1389,13 +1336,9 @@ java -XX:+UseZGC -Xmx16g MyApp
 
 **ZGC = минимальные паузы за счёт дополнительной памяти и CPU.**
 
-```shellscript
-# Java 11-14 (экспериментальный)
-java -XX:+UnlockExperimentalVMOptions -XX:+UseZGC -Xmx16g MyApp
+---
 
-# Java 15+ (production ready)
-java -XX:+UseZGC -Xmx16g MyApp
-```
+## Вопрос №23.
 
 **Ответ: Обе транзакции будут заблокированы до ручного вмешательства**
 
