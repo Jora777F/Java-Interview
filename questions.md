@@ -9,6 +9,7 @@
 6. [Вопрос №6](#вопрос-6)
 7. [Вопрос №7](#вопрос-7)
 8. [Вопрос №8](#вопрос-8)
+9. [Вопрос №9](#вопрос-9)
 
 ## Вопрос №1.
 Нужно реализовать кэширование объектов, которые тяжело
@@ -368,7 +369,7 @@ Invoice должен сам вычислять сумму по позициям,
 
 Принцип **Information Expert** из GRASP: операцию должен выполнять класс, у которого есть необходимая информация.
 
-## Применение к Invoice:
+### Применение к Invoice:
 
 ```java
 class Invoice {
@@ -385,7 +386,7 @@ class Invoice {
 
 **Invoice** имеет данные (позиции) → **Invoice** вычисляет сумму.
 
-## Неправильно (нарушение Information Expert):
+### Неправильно (нарушение Information Expert):
 
 ```java
 class InvoiceService {
@@ -396,7 +397,7 @@ class InvoiceService {
 }
 ```
 
-## Почему не другие принципы:
+### Почему не другие принципы:
 
 - **Low Coupling** - о снижении зависимостей между модулями
 - **Controller** - о том, кто принимает запросы от UI/API
@@ -404,33 +405,29 @@ class InvoiceService {
 
 **Information Expert** = ответственность там, где данные. Invoice знает свои позиции → Invoice вычисляет сумму.
 
-```java
-class Invoice {
-    private List<InvoiceItem> items;
-    
-    // Invoice сам вычисляет сумму, т.к. у него есть items
-    public BigDecimal calculateTotal() {
-        return items.stream()
-            .map(InvoiceItem::getPrice)
-            .reduce(BigDecimal.ZERO, BigDecimal::add);
-    }
-}
-```
+---
 
-```java
-class InvoiceService {
-    // Сервис не должен знать внутреннюю структуру Invoice
-    public BigDecimal calculateTotal(Invoice invoice) {
-        return invoice.getItems().stream()...
-    }
-}
+## Вопрос №9.
+Есть запрос:
+```sql
+SELECT u.id, COUNT(o.id)
+FROM users u
+LEFT JOIN orders o ON u.id = o.user_id
+GROUP BY u.id;
 ```
+Почему результат может отличаться по производительности в зависимости
+от числа заказов?
+1) JOIN всегда работает одинаково вне зависимости от данных
+2) LEFT JOIN блокирует индексы при группировке
+3) COUNT всегда медленный при больших таблицах
+4) Планировщик PostgreSQL выбирает Hash Join или Nested Loop в зависимости
+от статистики.
 
-**Ответ: Планировщик PostgreSQL выбирает Hash Join или Nested Loop в зависимости от статистики**
+> **Ответ: Планировщик PostgreSQL выбирает Hash Join или Nested Loop в зависимости от статистики**
 
 Производительность зависит от того, какой **план выполнения** выберет PostgreSQL, основываясь на статистике таблиц.
 
-## Проблема запроса:
+### Проблема запроса:
 
 ```sql
 SELECT u.id, COUNT(o.id)
@@ -451,14 +448,14 @@ GROUP BY u.id;
 - O(n * m) сложность
 - Используется, если статистика неточная или таблицы маленькие
 
-## Что влияет на выбор:
+### Что влияет на выбор:
 
 - **Статистика таблиц** (ANALYZE)
 - **Размер таблиц**
 - **Наличие индексов** на `orders.user_id`
 - **Настройки PostgreSQL** (`work_mem`, `random_page_cost`)
 
-## Проверить план:
+### Проверить план:
 
 ```sql
 EXPLAIN ANALYZE
@@ -468,7 +465,7 @@ LEFT JOIN orders o ON u.id = o.user_id
 GROUP BY u.id;
 ```
 
-## Почему не другие варианты:
+### Почему не другие варианты:
 
 - **"JOIN всегда одинаковый"** - нет, есть разные алгоритмы
 - **"LEFT JOIN блокирует индексы"** - нет, индексы работают
@@ -476,22 +473,17 @@ GROUP BY u.id;
 
 **Планировщик выбирает алгоритм JOIN на основе статистики → производительность может сильно отличаться.**
 
-```sql
-SELECT u.id, COUNT(o.id)
-FROM users u
-LEFT JOIN orders o ON u.id = o.user_id
-GROUP BY u.id;
-```
+---
 
-```sql
-EXPLAIN ANALYZE
-SELECT u.id, COUNT(o.id)
-FROM users u
-LEFT JOIN orders o ON u.id = o.user_id
-GROUP BY u.id;
-```
+## Вопрос №10.
+В Spring Batch настроен Job с шагами: step1 -> step2 -> step3.
+Что произойдет, если step2 завершится с ошибкой?
+1) Batch автоматически перезапустит step2
+2) Job прервется, step3 не будет выполнен
+3) Step3 выполнится независимо от step2
+4) Ошибка будет проигнорирована и job продолжит работу
 
-**Ответ: Job прервётся, step3 не будет выполнен**
+> **Ответ: Job прервётся, step3 не будет выполнен**
 
 По умолчанию в Spring Batch, если step завершается с ошибкой, **job останавливается** и последующие steps не выполняются.
 
