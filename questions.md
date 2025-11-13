@@ -10,6 +10,7 @@
 7. [Вопрос №7](#вопрос-7)
 8. [Вопрос №8](#вопрос-8)
 9. [Вопрос №9](#вопрос-9)
+10. [Вопрос №10](#вопрос-10)
 
 ## Вопрос №1.
 Нужно реализовать кэширование объектов, которые тяжело
@@ -487,7 +488,7 @@ GROUP BY u.id;
 
 По умолчанию в Spring Batch, если step завершается с ошибкой, **job останавливается** и последующие steps не выполняются.
 
-## Что происходит:
+### Что происходит:
 
 ```java
 @Bean
@@ -506,7 +507,7 @@ public Job job(JobRepository jobRepository) {
 - **Job status: FAILED**
 - step3 **не запускается**
 
-## Как изменить поведение:
+### Как изменить поведение:
 
 ### 1. Игнорировать ошибку step2:
 ```java
@@ -530,7 +531,7 @@ public Step step2() {
 }
 ```
 
-## Почему не другие варианты:
+### Почему не другие варианты:
 
 - **"Batch автоматически перезапустит"** - нет, нужна явная настройка
 - **"Step3 выполнится независимо"** - нет, steps выполняются последовательно
@@ -538,42 +539,21 @@ public Step step2() {
 
 **Дефолтное поведение: ошибка в step → job прерывается → следующие steps не выполняются.**
 
-```java
-@Bean
-public Job job(JobRepository jobRepository) {
-    return new JobBuilder("myJob", jobRepository)
-        .start(step1())
-        .next(step2())  // Если упадёт - job остановится
-        .next(step3())  // Не выполнится
-        .build();
-}
-```
+---
 
-```java
-.start(step1())
-.next(step2())
-.on("FAILED").to(step3())  // Даже при ошибке идём на step3
-.from(step2()).on("*").to(step3())
-.end()
-```
+## Вопрос №11.
+Приложение должно обрабатывать каждое сообщение ровно один раз.
+Какие настройки Kafka нужно учесть?
+1) Использовать автокоммит offset каждые 5 секунд
+2) Включить idempotent producer и transactional consumer для exactly-once semantics
+3) Сохранять offset вручную в сторонней БД
+4) Установить ack=0 для ускорения доставки
 
-```java
-@Bean
-public Step step2() {
-    return new StepBuilder("step2", jobRepository)
-        .tasklet(...)
-        .faultTolerant()
-        .retry(Exception.class)
-        .retryLimit(3)  // Перезапустит до 3 раз
-        .build();
-}
-```
-
-**Ответ: Включить idempotent producer и transactional consumer для exactly-once semantics**
+> **Ответ: Включить idempotent producer и transactional consumer для exactly-once semantics**
 
 Для обработки каждого сообщения **ровно один раз** нужна **exactly-once semantics (EOS)** в Kafka.
 
-## Настройка:
+### Настройка:
 
 ### Producer (idempotent):
 ```java
@@ -615,7 +595,7 @@ try {
 }
 ```
 
-## Почему не другие варианты:
+### Почему не другие варианты:
 
 - **"Автокоммит offset каждые 5 секунд"** - может привести к дублям (consumer упал между обработкой и коммитом)
 - **"Сохранять offset в БД"** - усложняет архитектуру, не гарантирует exactly-once без транзакций
@@ -623,48 +603,21 @@ try {
 
 **Idempotent producer + transactional consumer + manual commit = exactly-once semantics.**
 
-```java
-Properties props = new Properties();
-props.put("enable.idempotence", "true");  // Идемпотентность
-props.put("acks", "all");
-props.put("retries", Integer.MAX_VALUE);
-```
+---
 
-```java
-Properties props = new Properties();
-props.put("isolation.level", "read_committed");  // Читать только committed
-props.put("enable.auto.commit", "false");        // Ручной commit
+## Вопрос №12.
+При сохранении новой сущности User в базе остается старая версия объекта.
+Почему?
+1) Hibernate не поддерживает update без merge
+2) Entity находится в состоянии **detached**, изменения не отслеживаются
+3) Репозиторий работает только с immutable объектами
+4) Объект должен быть помечен как @Embeddable
 
-// В коде
-consumer.subscribe(Arrays.asList("topic"));
-while (true) {
-    ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(100));
-    for (ConsumerRecord<String, String> record : records) {
-        processMessage(record);  // Обработка
-    }
-    consumer.commitSync();  // Commit после обработки
-}
-```
-
-```java
-producer.initTransactions();
-try {
-    producer.beginTransaction();
-    // Читаем из Kafka
-    // Обрабатываем
-    // Пишем в Kafka
-    producer.sendOffsetsToTransaction(offsets, consumerGroupId);
-    producer.commitTransaction();
-} catch (Exception e) {
-    producer.abortTransaction();
-}
-```
-
-**Ответ: Entity находится в состоянии detached, изменения не отслеживаются**
+> **Ответ: Entity находится в состоянии detached, изменения не отслеживаются**
 
 Когда сохраняешь новую сущность `User`, старая версия остается в памяти в состоянии **detached** (отсоединена от persistence context).
 
-## Что происходит:
+### Что происходит:
 
 ```java
 User user = new User("John");
@@ -676,14 +629,14 @@ user.setName("Jane");            // Изменение не отслеживае
 entityManager.flush();           // Ничего не произойдет - user detached
 ```
 
-## Состояния Entity:
+### Состояния Entity:
 
 1. **Transient** - новый объект, Hibernate не знает о нём
 2. **Managed** - объект в persistence context, изменения отслеживаются
 3. **Detached** - был в persistence context, но сессия закрылась
 4. **Removed** - помечен на удаление
 
-## Решение - вернуть в managed:
+### Решение - вернуть в managed:
 
 ```java
 User user = new User("John");
@@ -699,7 +652,7 @@ User managedUser = entityManager.find(User.class, user.getId());
 managedUser.setName("Jane");       // Отслеживается
 ```
 
-## Почему не другие варианты:
+### Почему не другие варианты:
 
 - **"Hibernate не поддерживает update без merge"** - поддерживает, но только для managed entities
 - **"Репозиторий работает только с immutable"** - нет, работает с любыми entities
@@ -707,35 +660,25 @@ managedUser.setName("Jane");       // Отслеживается
 
 **После persist/flush entity становится detached → изменения не отслеживаются → нужен merge для возврата в managed.**
 
+---
+
+## Вопрос №13.
+В JPA используется каскад:
 ```java
-User user = new User("John");
-entityManager.persist(user);     // user в состоянии MANAGED
-entityManager.flush();
-
-// После flush/commit user переходит в DETACHED
-user.setName("Jane");            // Изменение не отслеживается
-entityManager.flush();           // Ничего не произойдет - user detached
+@OneToMany(mappedBy = "user", cascade = CascadeType.ALL)
+private List<Order> orders;
 ```
+Что произойдет при удалении?
+1) Удалятся только связи, заказы останутся
+2) Удалятся и пользователь, и связанные заказы
+3) Удалится только пользователь
+4) Hibernate заблокирует транзакцию из-за каскада
 
-```java
-User user = new User("John");
-entityManager.persist(user);
-entityManager.flush();
-
-// Вариант 1: merge
-user = entityManager.merge(user);  // Возвращает managed копию
-user.setName("Jane");              // Теперь отслеживается
-
-// Вариант 2: find
-User managedUser = entityManager.find(User.class, user.getId());
-managedUser.setName("Jane");       // Отслеживается
-```
-
-**Ответ: Удалятся и пользователь, и связанные заказы**
+> **Ответ: Удалятся и пользователь, и связанные заказы**
 
 `CascadeType.ALL` включает **все операции каскадирования**, в том числе **REMOVE** (удаление).
 
-## Что происходит:
+### Что происходит:
 
 ```java
 @Entity
@@ -749,7 +692,7 @@ entityManager.remove(user);
 // Hibernate автоматически удалит все связанные Order
 ```
 
-## CascadeType.ALL включает:
+### CascadeType.ALL включает:
 
 - **PERSIST** - сохранение связанных объектов
 - **MERGE** - обновление связанных объектов
@@ -757,14 +700,14 @@ entityManager.remove(user);
 - **REFRESH** - обновление из БД
 - **DETACH** - отсоединение от контекста
 
-## SQL, который выполнится:
+### SQL, который выполнится:
 
 ```sql
 DELETE FROM orders WHERE user_id = ?;
 DELETE FROM users WHERE id = ?;
 ```
 
-## Если не нужно удалять заказы:
+### Если не нужно удалять заказы:
 
 ```java
 @OneToMany(mappedBy = "user", cascade = {CascadeType.PERSIST, CascadeType.MERGE})
@@ -777,7 +720,7 @@ private List<Order> orders;
 @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = false)
 ```
 
-## Почему не другие варианты:
+### Почему не другие варианты:
 
 - **"Удалятся только связи"** - нет, удалятся сами объекты Order
 - **"Удалится только пользователь"** - нет, каскад распространяется на Order
@@ -785,33 +728,24 @@ private List<Order> orders;
 
 **CascadeType.ALL + remove(user) = удаление User и всех его Order.**
 
+---
+
+## Вопрос №14.
 ```java
-@Entity
-class User {
-    @OneToMany(mappedBy = "user", cascade = CascadeType.ALL)
-    private List<Order> orders;
-}
+var x = List.of(1, 2, 3);     
+var y = List.copyOf(x);
 
-// При удалении User
-entityManager.remove(user);
-// Hibernate автоматически удалит все связанные Order
+System.out.println(x == y); 
 ```
+Что будет выведено?
+1) true, так как copyOf возвращает ссылку на оригинал, если он неизменяемый
+2) false, потому что copyOf копирует элементы
+3) true, так как copyOf оптимизирован и возвращает тот же объект, если
+источник уже unmodifiable
+4) false, так как copyOf всегда создает новый список
 
-```sql
-DELETE FROM orders WHERE user_id = ?;
-DELETE FROM users WHERE id = ?;
-```
 
-```java
-@OneToMany(mappedBy = "user", cascade = {CascadeType.PERSIST, CascadeType.MERGE})
-private List<Order> orders;
-```
-
-```java
-@OneToMany(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = false)
-```
-
-**Ответ: `false`, так как `copyOf` всегда создаёт новый список**
+> **Ответ: `false`, так как `copyOf` всегда создаёт новый список**
 
 `List.copyOf()` **всегда создаёт новую неизменяемую копию**, даже если исходный список не менялся.
 
