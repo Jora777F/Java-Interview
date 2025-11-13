@@ -749,7 +749,7 @@ System.out.println(x == y);
 
 `List.copyOf()` **всегда создаёт новую неизменяемую копию**, даже если исходный список не менялся.
 
-## Что происходит:
+### Что происходит:
 
 ```java
 var x = List.of(1, 2, 3);      // Создаётся immutable список
@@ -758,14 +758,14 @@ var y = List.copyOf(x);        // Создаётся НОВЫЙ immutable спи
 System.out.println(x == y);    // false - разные объекты в памяти
 ```
 
-## Проверка:
+### Проверка:
 
 ```java
 System.out.println(x.equals(y));  // true - содержимое одинаковое
 System.out.println(x == y);       // false - разные ссылки
 ```
 
-## Почему создаётся новая копия:
+### Почему создаётся новая копия:
 
 `List.copyOf()` гарантирует **защитную копию** (defensive copy), чтобы изменения в исходном списке не влияли на копию.
 
@@ -777,37 +777,27 @@ mutable.add(4);
 System.out.println(copy);  // [1, 2, 3] - не изменился
 ```
 
-## Оптимизация (но не в этом случае):
+### Оптимизация (но не в этом случае):
 
 В некоторых реализациях `copyOf()` может вернуть ту же ссылку, если список уже immutable и того же типа, но это **не гарантировано** спецификацией и не стоит на это полагаться.
 
 **Вывод: `false` - `copyOf()` создаёт новый объект.**
 
-```java
-var x = List.of(1, 2, 3);      // Создаётся immutable список
-var y = List.copyOf(x);        // Создаётся НОВЫЙ immutable список
+---
 
-System.out.println(x == y);    // false - разные объекты в памяти
-```
+## Вопрос №15.
+В топике 10 партиций, а консьюмер-группа состоит из 15 экземпляров.
+Сколько консьюмеров реально будут получать сообщения?
+1) Только 10, остальные 5 будут без партиций и простаивать
+2) Kafka создаст новые партиции автоматически для балансировки
+3) Все 15, сообщения будут распределяться равномерно
+4) Только один, остальные будут ждать ребаланса
 
-```java
-System.out.println(x.equals(y));  // true - содержимое одинаковое
-System.out.println(x == y);       // false - разные ссылки
-```
-
-```java
-List<Integer> mutable = new ArrayList<>(List.of(1, 2, 3));
-List<Integer> copy = List.copyOf(mutable);
-
-mutable.add(4);
-System.out.println(copy);  // [1, 2, 3] - не изменился
-```
-
-**Ответ: Только 10, остальные 5 будут без партиций и простаивать**
+> **Ответ: Только 10, остальные 5 будут без партиций и простаивать**
 
 В Kafka **количество активных консьюмеров в группе ограничено количеством партиций**.
 
-## Как работает:
+### Как работает:
 
 ```
 Топик: 10 партиций
@@ -824,7 +814,7 @@ Consumer Group: 15 экземпляров
 - Консьюмер 15 → IDLE
 ```
 
-## Правило Kafka:
+### Правило Kafka:
 
 **Одна партиция = максимум один консьюмер в группе**
 
@@ -832,7 +822,7 @@ Consumer Group: 15 экземпляров
 - Если консьюмеров = партиций → идеальное распределение 1:1
 - Если консьюмеров > партиций → лишние консьюмеры простаивают
 
-## Пример оптимального распределения:
+### Пример оптимального распределения:
 
 ```
 10 партиций, 5 консьюмеров:
@@ -843,41 +833,27 @@ Consumer Group: 15 экземпляров
 - Консьюмер 5 → Партиции 8, 9
 ```
 
-## Зачем лишние консьюмеры:
+### Зачем лишние консьюмеры:
 
 Они служат **резервом** - если один из активных консьюмеров упадет, Kafka автоматически перебалансирует партиции на простаивающие экземпляры.
 
 **Вывод: реально работают только 10 консьюмеров, 5 в режиме standby.**
 
-```plaintext
-Топик: 10 партиций
-Consumer Group: 15 экземпляров
+---
 
-Распределение:
-- Консьюмер 1  → Партиция 0
-- Консьюмер 2  → Партиция 1
-- ...
-- Консьюмер 10 → Партиция 9
-- Консьюмер 11 → IDLE (простаивает)
-- Консьюмер 12 → IDLE
-- ...
-- Консьюмер 15 → IDLE
-```
+## Вопрос №16.
+Какое преимущество даёт использование @TransactionalEventListener
+вместо обычного @EventListener?
+1) Слушатель может быть вызван до rollback
+2) Он не требует регистрации в контексте Spring
+3) Он работает быстрее, так как не зависит от прокси
+4) Обработчик события вызывается только после успешного commit транзакции
 
-```plaintext
-10 партиций, 5 консьюмеров:
-- Консьюмер 1 → Партиции 0, 1
-- Консьюмер 2 → Партиции 2, 3
-- Консьюмер 3 → Партиции 4, 5
-- Консьюмер 4 → Партиции 6, 7
-- Консьюмер 5 → Партиции 8, 9
-```
-
-**Ответ: Обработчик события вызывается только после успешного commit транзакции**
+> **Ответ: Обработчик события вызывается только после успешного commit транзакции**
 
 `@TransactionalEventListener` позволяет **отложить выполнение слушателя** до определенной фазы транзакции.
 
-## Как работает:
+### Как работает:
 
 ```java
 @Service
@@ -900,14 +876,14 @@ class OrderEventListener {
 }
 ```
 
-## Фазы TransactionPhase:
+### Фазы TransactionPhase:
 
 - **AFTER_COMMIT** (по умолчанию) - после успешного commit
 - **AFTER_ROLLBACK** - после rollback
 - **AFTER_COMPLETION** - после commit или rollback
 - **BEFORE_COMMIT** - перед commit (но внутри транзакции)
 
-## Преимущества:
+### Преимущества:
 
 ```java
 // Обычный @EventListener
@@ -925,7 +901,7 @@ public void handle(OrderCreatedEvent event) {
 }
 ```
 
-## Почему не другие варианты:
+### Почему не другие варианты:
 
 - **"Слушатель может быть вызван до rollback"** - нет, по умолчанию вызывается после commit
 - **"Не требует регистрации"** - требует, это Spring-аннотация
@@ -933,48 +909,25 @@ public void handle(OrderCreatedEvent event) {
 
 **`@TransactionalEventListener` = гарантия, что обработчик выполнится только после успешного commit транзакции.**
 
+---
+
+## Вопрос №17.
+В коде:
 ```java
-@Service
-class OrderService {
-    @Transactional
-    public void createOrder(Order order) {
-        orderRepository.save(order);
-        eventPublisher.publishEvent(new OrderCreatedEvent(order));
-        // Слушатель НЕ вызовется здесь
-    } // Транзакция commit → слушатель вызывается ПОСЛЕ commit
-}
-
-@Component
-class OrderEventListener {
-    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
-    public void handleOrderCreated(OrderCreatedEvent event) {
-        // Вызывается ТОЛЬКО если транзакция успешно закоммичена
-        sendEmail(event.getOrder());
-    }
-}
+@Version
+private Long version;
 ```
+Для чего используется поле version?
+1) Для индексации записей в таблице
+2) Для реализации оптимистичной блокировки
+3) Для хранения номера последнего коммита
+4) Для отслеживания времени создания записи
 
-```java
-// Обычный @EventListener
-@EventListener
-public void handle(OrderCreatedEvent event) {
-    sendEmail(); // Вызовется ДО commit
-    // Если транзакция откатится, email уже отправлен (плохо!)
-}
-
-// @TransactionalEventListener
-@TransactionalEventListener
-public void handle(OrderCreatedEvent event) {
-    sendEmail(); // Вызовется ПОСЛЕ commit
-    // Email отправится только если заказ реально сохранен (хорошо!)
-}
-```
-
-**Ответ: Для реализации оптимистичной блокировки**
+> **Ответ: Для реализации оптимистичной блокировки**
 
 `@Version` используется для **Optimistic Locking** - предотвращения конфликтов при одновременном изменении одной записи разными транзакциями.
 
-## Как работает:
+### Как работает:
 
 ```java
 @Entity
@@ -990,7 +943,7 @@ class Product {
 }
 ```
 
-## Механизм:
+### Механизм:
 
 ```java
 // Транзакция 1
@@ -1011,7 +964,7 @@ em.merge(p2);  // UPDATE ... SET price=200, version=1 WHERE id=1 AND version=0
                // OptimisticLockException
 ```
 
-## SQL, который генерируется:
+### SQL, который генерируется:
 
 ```sql
 UPDATE product 
@@ -1021,7 +974,7 @@ WHERE id = ? AND version = ?
 
 Если `version` не совпадает → update не выполнится → exception.
 
-## Почему не другие варианты:
+### Почему не другие варианты:
 
 - **"Для индексации"** - нет, индексы создаются через `@Index`
 - **"Для хранения номера коммита"** - нет, это не связано с Git/VCS
@@ -1029,50 +982,18 @@ WHERE id = ? AND version = ?
 
 **`@Version` = оптимистичная блокировка для предотвращения lost updates.**
 
-```java
-@Entity
-class Product {
-    @Id
-    private Long id;
-    
-    @Version
-    private Long version;  // Автоматически увеличивается при каждом update
-    
-    private String name;
-    private BigDecimal price;
-}
-```
+## Вопрос №18.
+При использовании AOP в Spring, почему метод private не перехватывается?
+1) Аспекты требуют явной аннотации @AspectTarget
+2) Spring создает прокси только для public/protected методов
+3) Аспекты работают только для статических методов
+4) Прокси всегда вызывают методы напрямую
 
-```java
-// Транзакция 1
-Product p1 = em.find(Product.class, 1L);  // version = 0
-p1.setPrice(100);
-
-// Транзакция 2 (параллельно)
-Product p2 = em.find(Product.class, 1L);  // version = 0
-p2.setPrice(200);
-
-// Транзакция 1 commit
-em.merge(p1);  // UPDATE ... SET price=100, version=1 WHERE id=1 AND version=0
-               // Успех! version теперь = 1
-
-// Транзакция 2 commit
-em.merge(p2);  // UPDATE ... SET price=200, version=1 WHERE id=1 AND version=0
-               // FAIL! version уже = 1, а не 0
-               // OptimisticLockException
-```
-
-```sql
-UPDATE product 
-SET price = ?, version = version + 1 
-WHERE id = ? AND version = ?
-```
-
-**Ответ: Spring создаёт прокси только для public/protected методов**
+> **Ответ: Spring создаёт прокси только для public/protected методов**
 
 Spring AOP работает через **прокси-объекты** (JDK dynamic proxy или CGLIB), которые могут перехватывать только **публичные методы**.
 
-## Почему private не работает:
+### Почему private не работает:
 
 ```java
 @Component
@@ -1090,7 +1011,7 @@ class MyService {
 }
 ```
 
-## Как работает прокси:
+### Как работает прокси:
 
 ```java
 // Spring создаёт прокси
@@ -1108,7 +1029,7 @@ class MyServiceProxy extends MyService {
 }
 ```
 
-## Ограничения прокси:
+### Ограничения прокси:
 
 1. **Private методы** - не перехватываются (нельзя переопределить)
 2. **Final методы** - не перехватываются (нельзя переопределить)
@@ -1137,58 +1058,21 @@ class MyService {
 
 **Spring AOP = прокси = только public/protected методы. Private недоступен для переопределения.**
 
-```java
-@Component
-class MyService {
-    
-    @Transactional  // НЕ РАБОТАЕТ
-    private void saveData() {
-        // ...
-    }
-    
-    @Transactional  // РАБОТАЕТ
-    public void saveDataPublic() {
-        // ...
-    }
-}
-```
+---
 
-```java
-// Spring создаёт прокси
-class MyServiceProxy extends MyService {
-    
-    @Override
-    public void saveDataPublic() {  // Может переопределить public
-        // Начать транзакцию
-        super.saveDataPublic();
-        // Закоммитить транзакцию
-    }
-    
-    // НЕ МОЖЕТ переопределить private метод!
-    // private void saveData() { ... }  // Компилятор не позволит
-}
-```
+## Вопрос №19.
+В Spring Boot приложении используется Actuator /metrics.
+Что лучше всего использовать для мониторинга количества неудачных запросов?
+1) Периодический SQL-запрос к таблице логов
+2) Только health-check /actuator/health
+3) Журнал ошибок в логах без метрик
+4) Micrometer c метрикой http.server.requests{status="5xx"} и алертингом в Prometheus/Grafana.
 
-```java
-@Component
-class MyService {
-    
-    public void methodA() {
-        this.methodB();  // Прямой вызов, прокси НЕ работает!
-    }
-    
-    @Transactional
-    public void methodB() {
-        // Транзакция НЕ откроется при вызове из methodA
-    }
-}
-```
-
-**Ответ: Micrometer с метрикой `http.server.requests{status="5xx"}` и алертингом в Prometheus/Grafana**
+> **Ответ: Micrometer с метрикой `http.server.requests{status="5xx"}` и алертингом в Prometheus/Grafana**
 
 Spring Boot Actuator автоматически собирает метрики через **Micrometer**, включая количество HTTP-запросов с разбивкой по статус-кодам.
 
-## Настройка:
+### Настройка:
 
 ### 1. Зависимости (обычно уже есть):
 ```xml
@@ -1241,7 +1125,7 @@ sum(rate(http_server_requests_seconds_count[5m])) * 100
     summary: "High 5xx error rate"
 ```
 
-## Почему не другие варианты:
+### Почему не другие варианты:
 
 - **"Периодический SQL-запрос к таблице логов"** - неэффективно, нагружает БД, нет real-time
 - **"Только health-check"** - показывает только статус приложения (up/down), не детализирует ошибки
@@ -1249,51 +1133,10 @@ sum(rate(http_server_requests_seconds_count[5m])) * 100
 
 **Micrometer + Prometheus + Grafana = стандартный стек для мониторинга метрик в Spring Boot.**
 
-```xml
-<dependency>
-    <groupId>org.springframework.boot</groupId>
-    <artifactId>spring-boot-starter-actuator</artifactId>
-</dependency>
-<dependency>
-    <groupId>io.micrometer</groupId>
-    <artifactId>micrometer-registry-prometheus</artifactId>
-</dependency>
-```
+---
 
-```yaml
-management:
-  endpoints:
-    web:
-      exposure:
-        include: prometheus,health,metrics
-  metrics:
-    tags:
-      application: ${spring.application.name}
-```
+## Вопрос №20.
 
-```plaintext
-http_server_requests_seconds_count{status="500"} 15
-http_server_requests_seconds_count{status="503"} 3
-http_server_requests_seconds_count{uri="/api/users",status="500"} 10
-```
-
-```plaintext
-# Количество 5xx за последние 5 минут
-sum(rate(http_server_requests_seconds_count{status=~"5.."}[5m]))
-
-# Процент ошибок
-sum(rate(http_server_requests_seconds_count{status=~"5.."}[5m])) 
-/ 
-sum(rate(http_server_requests_seconds_count[5m])) * 100
-```
-
-```yaml
-- alert: HighErrorRate
-  expr: rate(http_server_requests_seconds_count{status=~"5.."}[5m]) > 10
-  for: 5m
-  annotations:
-    summary: "High 5xx error rate"
-```
 
 **Ответ: Сообщения будут разделены между консьюмерами группы по партициям**
 
