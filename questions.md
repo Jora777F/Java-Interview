@@ -4,6 +4,8 @@
 1. [Вопрос №1](#вопрос-1)
 2. [Вопрос №2](#вопрос-2)
 3. [Вопрос №3](#вопрос-3)
+4. [Вопрос №4](#вопрос-4)
+5. [Вопрос №5](#вопрос-5)
 
 ## Вопрос №1.
 Нужно реализовать кэширование объектов, которые тяжело
@@ -118,12 +120,19 @@ entityManager.persist(user2); // ConstraintViolationException: duplicate key
 ---
 
 ## Вопрос №3
+В проекте используется `CompletableFuture`. Нужно запустить два независимых
+асинхронных вычисления и дождаться их завершения, после чего объединить
+результат. Какой метод лучше использовать?
+1) `CompletableFuture.allOf(f1, f2).thenApply(...)`
+2) `CompletableFuture.runAfterBoth(f1, f2, runnable)`
+3) `CompletableFuture.applyToEither(f1, f2, fn)`
+4) `CompletableFuture.anyOf(f1, f2)`
 
-**Ответ: CompletableFuture.allOf(f1, f2).thenApply(...)**
+> **Ответ: CompletableFuture.allOf(f1, f2).thenApply(...)**
 
 `allOf()` ждет завершения **всех** futures и позволяет объединить результаты.
 
-## Пример:
+### Пример:
 
 ```java
 CompletableFuture<String> f1 = CompletableFuture.supplyAsync(() -> "Result1");
@@ -140,7 +149,7 @@ CompletableFuture<String> combined = CompletableFuture.allOf(f1, f2)
 String result = combined.join(); // "Result1 + Result2"
 ```
 
-## Почему не другие:
+### Почему не другие:
 
 - **`runAfterBoth(f1, f2, runnable)`** - запускает `Runnable` (без возврата значения), не позволяет объединить результаты
   ```java
@@ -156,34 +165,21 @@ String result = combined.join(); // "Result1 + Result2"
 
 **`allOf()`** - единственный метод, который ждет все futures и дает доступ ко всем результатам.
 
-```java
-CompletableFuture<String> f1 = CompletableFuture.supplyAsync(() -> "Result1");
-CompletableFuture<String> f2 = CompletableFuture.supplyAsync(() -> "Result2");
+---
 
-CompletableFuture<String> combined = CompletableFuture.allOf(f1, f2)
-    .thenApply(v -> {
-        // Все futures завершены, можно получить результаты
-        String r1 = f1.join();
-        String r2 = f2.join();
-        return r1 + " + " + r2;
-    });
+## Вопрос №4.
+Почему `flush()` не гарантирует немедленное выполнение SQL в БД?
+1) flush работает только в асинхронных транзакциях
+2) flush синхронизирует состояние persistence context с SQL-операциями,
+но выполнение может отложиться
+3) flush всегда откладывает все операции до commit
+4) flush доступен только для batch операций
 
-String result = combined.join(); // "Result1 + Result2"
-```
-
-```java
-  f1.runAfterBoth(f2, () -> System.out.println("Done")); // Нет доступа к результатам
-```
-
-```java
-  f1.applyToEither(f2, result -> result); // Только один результат
-```
-
-**Ответ: flush синхронизирует состояние persistence context с SQL-операциями, но выполнение может отложиться**
+> **Ответ: flush синхронизирует состояние persistence context с SQL-операциями, но выполнение может отложиться**
 
 `flush()` отправляет изменения из persistence context в БД (генерирует SQL), но **не гарантирует немедленное выполнение** этих SQL-запросов.
 
-## Почему:
+### Почему:
 
 ```java
 entityManager.persist(user);
@@ -197,7 +193,7 @@ entityManager.flush(); // Генерирует INSERT, но...
 3. **НО**: они могут быть в буфере JDBC-драйвера, сетевом буфере, или ждать в очереди БД
 4. Реальное выполнение зависит от настроек драйвера, сети, нагрузки БД
 
-## Гарантия выполнения - только commit:
+### Гарантия выполнения - только commit:
 
 ```java
 entityManager.persist(user);
@@ -205,7 +201,7 @@ entityManager.flush();    // SQL отправлен, но может быть в
 transaction.commit();     // Гарантированно выполнен и зафиксирован
 ```
 
-## Почему не другие варианты:
+### Почему не другие варианты:
 
 - **"работает только в асинхронных транзакциях"** - нет, работает в обычных
 - **"всегда откладывает до commit"** - нет, отправляет SQL, но не коммитит
@@ -213,22 +209,22 @@ transaction.commit();     // Гарантированно выполнен и з
 
 `flush()` = синхронизация с БД, но не commit. Выполнение может быть отложено на уровне драйвера/сети/БД.
 
-```java
-entityManager.persist(user);
-entityManager.flush(); // Генерирует INSERT, но...
-```
+---
 
-```java
-entityManager.persist(user);
-entityManager.flush();    // SQL отправлен, но может быть в буфере
-transaction.commit();     // Гарантированно выполнен и зафиксирован
-```
+## Вопрос №5.
+Разработчик включает GC-логи:
+`[GC pause (G1 Evacuation Pause) (young) 45ms]`
+Что это означает?
+1) Minor GC в G1GC, копирование объектов из Eden в Survivor/Old
+2) Concurrent Phase GC без паузы
+3) Полная остановка JVM для Major GC
+4) Очистка Old Gen сегмента
 
-**Ответ: Minor GC в G1GC, копирование объектов из Eden в Survivor/Old**
+> **Ответ: Minor GC в G1GC, копирование объектов из Eden в Survivor/Old**
 
 `[GC pause (G1 Evacuation Pause) (young) 45ms]` - это **Minor GC** в сборщике мусора **G1GC**.
 
-## Что происходит:
+### Что происходит:
 
 **G1 Evacuation Pause** = процесс эвакуации (копирования) живых объектов из молодого поколения (young generation).
 
@@ -239,13 +235,13 @@ Eden region → Survivor region (или Old, если объект старый)
 Мертвые объекты просто удаляются
 ```
 
-## Детали лога:
+### Детали лога:
 
 - **`(young)`** - обрабатывается только молодое поколение (Eden + Survivor)
 - **`45ms`** - пауза приложения на 45 миллисекунд
 - **Evacuation** - G1GC копирует объекты между регионами, а не чистит "на месте"
 
-## Почему не другие:
+### Почему не другие:
 
 - **"Concurrent Phase GC без паузы"** - нет, `pause` означает остановку приложения (STW - Stop The World)
 - **"Полная остановка для Major GC"** - нет, `(young)` указывает на Minor GC
@@ -253,14 +249,10 @@ Eden region → Survivor region (или Old, если объект старый)
 
 **G1 Evacuation Pause** - стандартный Minor GC в G1, копирует живые объекты и освобождает регионы Eden.
 
-```plaintext
-Eden region → Survivor region (или Old, если объект старый)
-     ↓
-Копирование живых объектов
-Мертвые объекты просто удаляются
-```
+---
 
-**Ответ: Настроить метрики GC (Pause Time, Allocation Rate) и проанализировать параметры JVM GC (например, G1GC tuning)**
+
+> **Ответ: Настроить метрики GC (Pause Time, Allocation Rate) и проанализировать параметры JVM GC (например, G1GC tuning)**
 
 При росте задержек во время GC-пауз нужно **сначала понять проблему через метрики**, а потом **настроить GC**.
 
