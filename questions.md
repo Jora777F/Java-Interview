@@ -1339,8 +1339,21 @@ java -XX:+UseZGC -Xmx16g MyApp
 ---
 
 ## Вопрос №23.
+Есть транзакция:
+```sql
+BEGIN;
+UPDATE accounts SET balance = balance - 100 WHERE id = 1;
+UPDATE accounts SET balance = balance + 100 WHERE id = 2;
+COMMIT;
+```
+Что произойдет при одновременном запуске двух таких транзакций?
+1) Возможны блокировки строк, но PostgreSQL гарантирует целостность
+при уровне Read Committed
+2) Обе транзакции будут заблокированы до ручного вмешательства
+3) PostgreSQL автоматически выполнит rollback при конфликте
+4) Обе транзакции выполнятся параллельно, нарушив баланс
 
-**Ответ: Обе транзакции будут заблокированы до ручного вмешательства**
+> **Ответ: Обе транзакции будут заблокированы до ручного вмешательства**
 
 Это классический случай **deadlock (взаимной блокировки)** в PostgreSQL.
 
@@ -1405,7 +1418,7 @@ COMMIT;
 BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE;
 ```
 
-## Почему не другие варианты:
+### Почему не другие варианты:
 
 - **"Возможны блокировки, но Read Committed гарантирует целостность"** - не спасает от deadlock
 - **"Автоматический rollback"** - да, но **после обнаружения** deadlock, не до
@@ -1413,47 +1426,15 @@ BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE;
 
 **Deadlock → PostgreSQL откатит одну из транзакций через ~1 секунду.**
 
-```plaintext
-Транзакция 1:
-BEGIN;
-UPDATE accounts SET balance = balance - 100 WHERE id = 1;
--- Получила lock на строку id=1
--- Ждёт lock на строку id=2...
+## Вопрос №24.
+Spring Boot Actuator показывает `endpoint /health`. Какое утверждение
+верное?
+1) Endpoint доступен только через JMX, не через HTTP
+2) Endpoint всегда включает полную информацию о системах
+3) По умолчанию он возвращает только статус "UP" или "DOWN", подробности скрыты
+4) Для использования требуется явное подключение Spring Security
 
-Транзакция 2 (одновременно):
-BEGIN;
-UPDATE accounts SET balance = balance + 100 WHERE id = 2;
--- Получила lock на строку id=2
--- Ждёт lock на строку id=1...
-
-Результат: DEADLOCK
-```
-
-```plaintext
-ERROR: deadlock detected
-DETAIL: Process A waits for ShareLock on transaction B; blocked by process B.
-Process B waits for ShareLock on transaction A; blocked by process A.
-```
-
-```sql
--- Всегда обновлять в порядке возрастания id
-UPDATE accounts SET balance = balance - 100 WHERE id IN (1, 2) ORDER BY id;
-```
-
-```sql
-BEGIN;
-SELECT * FROM accounts WHERE id IN (1, 2) ORDER BY id FOR UPDATE;
--- Заблокировали обе строки сразу
-UPDATE accounts SET balance = balance - 100 WHERE id = 1;
-UPDATE accounts SET balance = balance + 100 WHERE id = 2;
-COMMIT;
-```
-
-```sql
-BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE;
-```
-
-**Ответ: По умолчанию он возвращает только статус "UP" или "DOWN", подробности скрыты**
+> **Ответ: По умолчанию он возвращает только статус "UP" или "DOWN", подробности скрыты**
 
 Endpoint `/actuator/health` по умолчанию показывает **минимальную информацию** о состоянии приложения из соображений безопасности.
 
@@ -1512,7 +1493,7 @@ management:
 }
 ```
 
-## Health Indicators (автоматические проверки):
+### Health Indicators (автоматические проверки):
 
 Spring Boot автоматически проверяет:
 - **DataSource** (БД)
@@ -1540,7 +1521,7 @@ public class CustomHealthIndicator implements HealthIndicator {
 }
 ```
 
-## Почему не другие варианты:
+### Почему не другие варианты:
 
 - **"Доступен только через JMX"** - нет, доступен через HTTP
 - **"Всегда включает полную информацию"** - нет, по умолчанию минимум
@@ -1548,68 +1529,26 @@ public class CustomHealthIndicator implements HealthIndicator {
 
 **По умолчанию `/health` показывает только UP/DOWN для безопасности. Детали нужно включать явно.**
 
-```json
-{
-  "status": "UP"
-}
-```
-
-```yaml
-management:
-  endpoint:
-    health:
-      show-details: always  # или when-authorized
-  endpoints:
-    web:
-      exposure:
-        include: health
-```
-
-```json
-{
-  "status": "UP",
-  "components": {
-    "db": {
-      "status": "UP",
-      "details": {
-        "database": "PostgreSQL",
-        "validationQuery": "isValid()"
-      }
-    },
-    "diskSpace": {
-      "status": "UP",
-      "details": {
-        "total": 499963174912,
-        "free": 336699858944,
-        "threshold": 10485760
-      }
-    },
-    "ping": {
-      "status": "UP"
-    }
-  }
-}
-```
+## Вопрос №25.
+Есть класс конфигурации:
 
 ```java
-@Component
-public class CustomHealthIndicator implements HealthIndicator {
-    @Override
-    public Health health() {
-        boolean serviceAvailable = checkExternalService();
-        if (serviceAvailable) {
-            return Health.up()
-                .withDetail("service", "available")
-                .build();
-        }
-        return Health.down()
-            .withDetail("service", "unavailable")
-            .build();
+
+@Configuration
+public class AppConfig {
+    @Bean
+    public Service service() {
+        return new ServiceImpl();
     }
 }
 ```
+Что произойдет, если метод service() будет вызван напрямую из другого бина?
+1) Будет создан новый объект Service при каждом вызове
+2) Контейнер всегда возвращает singleton-объект
+3) Метод вызовет сам себя рекурсивно
+4) Через прокси вернется один и тот же bean из контекста
 
-**Ответ: Через прокси вернётся один и тот же bean из контекста**
+> **Ответ: Через прокси вернётся один и тот же bean из контекста**
 
 Spring создаёт **CGLIB прокси** для `@Bean` методов в `@Configuration` классе. При вызове метода напрямую прокси перехватывает вызов и возвращает bean из контекста вместо создания нового.
 
@@ -1700,7 +1639,7 @@ public class AppConfig {
 }
 ```
 
-## Почему не другие варианты:
+### Почему не другие варианты:
 
 - **"Будет создан новый объект"** - нет, прокси вернёт существующий
 - **"Контейнер всегда возвращает singleton"** - да, но через прокси-механизм
@@ -1708,85 +1647,19 @@ public class AppConfig {
 
 **@Configuration + CGLIB прокси = вызов @Bean метода напрямую возвращает bean из контекста, а не создаёт новый.**
 
+## Вопрос 26.
+Что произойдет при выполнении кода:
 ```java
-@Configuration
-public class AppConfig {
-    
-    @Bean
-    public Service service() { 
-        return new ServiceImpl(); 
-    }
-    
-    @Bean
-    public Controller controller() {
-        // Вызываем service() напрямую
-        return new Controller(service());  // Прокси вернёт существующий bean!
-    }
-}
+Map<String, String> map = new HashMap<>();
+map.put(null, "value1");
+map.put("key", null);
 ```
+1) Нельзя хранить null значение, выбросится NPE
+2) Допустим null как ключ и как значение, оба элемента сохранятся
+3) Нельзя хранить null как ключ, выбросится NPE
+4) HashMap заменит null на пустую строку
 
-```java
-// Spring создаёт прокси AppConfig
-AppConfig$$EnhancerBySpringCGLIB extends AppConfig {
-    
-    private Map<String, Object> beanCache;
-    
-    @Override
-    public Service service() {
-        // Проверяем кэш
-        if (beanCache.contains("service")) {
-            return beanCache.get("service");  // Возвращаем singleton
-        }
-        Service bean = super.service();  // Создаём только если нет
-        beanCache.put("service", bean);
-        return bean;
-    }
-}
-```
-
-```java
-@Configuration
-public class AppConfig {
-    @Bean
-    public Service service() { 
-        System.out.println("Creating Service");
-        return new ServiceImpl(); 
-    }
-    
-    @Bean
-    public Controller controller() {
-        Service s1 = service();  // "Creating Service" - первый вызов
-        Service s2 = service();  // Ничего не выведет - вернётся тот же bean
-        System.out.println(s1 == s2);  // true
-        return new Controller(s1);
-    }
-}
-```
-
-```plaintext
-Creating Service
-true
-```
-
-```java
-// НЕТ @Configuration - обычный класс
-public class AppConfig {
-    @Bean
-    public Service service() { 
-        return new ServiceImpl(); 
-    }
-    
-    @Bean
-    public Controller controller() {
-        Service s1 = service();  // Новый объект
-        Service s2 = service();  // Ещё один новый объект
-        System.out.println(s1 == s2);  // false!
-        return new Controller(s1);
-    }
-}
-```
-
-**Ответ: Допустим `null` как ключ и как значение, оба элемента сохранятся**
+> **Ответ: Допустим `null` как ключ и как значение, оба элемента сохранятся**
 
 `HashMap` в Java **разрешает один `null` ключ и любое количество `null` значений**.
 
@@ -1863,58 +1736,7 @@ concurrent.put("key", null);    // ✗ NullPointerException
 
 **HashMap допускает один `null` ключ и множество `null` значений.**
 
-```java
-Map<String, String> map = new HashMap<>();
-map.put(null, "value1");  // ✓ Сохранится: null -> "value1"
-map.put("key", null);     // ✓ Сохранится: "key" -> null
-
-System.out.println(map.size());        // 2
-System.out.println(map.get(null));     // "value1"
-System.out.println(map.get("key"));    // null
-System.out.println(map.containsKey(null));  // true
-System.out.println(map.containsKey("key")); // true
-```
-
-```java
-map.put(null, "value1");
-map.put(null, "value2");  // Перезапишет предыдущее значение
-System.out.println(map.get(null));  // "value2"
-```
-
-```java
-map.put("key1", null);
-map.put("key2", null);
-map.put("key3", null);
-// Все сохранятся
-```
-
-```java
-// Упрощённая логика HashMap
-public V put(K key, V value) {
-    int hash = (key == null) ? 0 : key.hashCode();  // null -> hash = 0
-    // ... сохранение в bucket[0]
-}
-
-public V get(Object key) {
-    int hash = (key == null) ? 0 : key.hashCode();
-    // ... поиск в bucket[0]
-}
-```
-
-```java
-// HashMap - разрешает null
-HashMap<String, String> hashMap = new HashMap<>();
-hashMap.put(null, null);  // ✓ OK
-
-// Hashtable - НЕ разрешает null
-Hashtable<String, String> hashtable = new Hashtable<>();
-hashtable.put(null, "value");  // ✗ NullPointerException
-
-// ConcurrentHashMap - НЕ разрешает null
-ConcurrentHashMap<String, String> concurrent = new ConcurrentHashMap<>();
-concurrent.put(null, "value");  // ✗ NullPointerException
-concurrent.put("key", null);    // ✗ NullPointerException
-```
+## Вопрос №27.
 
 **Ответ: Исключение при сохранении приведёт к rollback и откату метода целиком**
 
