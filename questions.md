@@ -1737,8 +1737,22 @@ concurrent.put("key", null);    // ✗ NullPointerException
 **HashMap допускает один `null` ключ и множество `null` значений.**
 
 ## Вопрос №27.
+```java
+@Transactional
+public void updateUser(User user) {
+    repo.save(user);
+    sendNotification(user);
+}
+```
+Почему уведомление может не отправиться при ошибке в сохранении?
 
-**Ответ: Исключение при сохранении приведёт к rollback и откату метода целиком**
+1) Исключение при сохранении приведет к rollback и откату метода целиком
+2) Spring всегда выполняет save вне транзакции
+3) Вызов sendNotification всегда выполняется асинхронно
+4) Notification вызов выполняется до commit транзакции
+
+
+> **Ответ: Исключение при сохранении приведёт к rollback и откату метода целиком**
 
 Когда метод помечен `@Transactional`, **любое unchecked exception** (RuntimeException) вызывает **откат всей транзакции**, включая уже выполненные операции.
 
@@ -1834,80 +1848,20 @@ class NotificationService {
 
 **@Transactional + exception = rollback всей транзакции, включая save(). Уведомление не отправится.**
 
-```java
-@Transactional
-public void updateUser(User user) {
-    repo.save(user);              // 1. Сохранение в БД (в рамках транзакции)
-    sendNotification(user);       // 2. Если здесь exception...
-}
+## Вопрос №28
+В PostgreSQL есть запрос:
+```sql
+SELECT * FROM users WHERE created_at >= NOW() - Interval '1 day';
 ```
+Почему может не использоваться индекс по created_at?
 
-```java
-@Transactional
-public void updateUser(User user) {
-    repo.save(user);              // UPDATE выполнен (но не закоммичен)
-    
-    sendNotification(user);       // RuntimeException!
-    
-    // Транзакция откатывается (ROLLBACK)
-    // UPDATE отменяется
-    // Уведомление НЕ отправлено
-}
-```
+1) Индекс не работает для диапазонных запросов
+2) PostgreSQL не поддерживает индексы по TIMESTAMP
+3) Функция NOW() делает условие нестабильным для планировщика
+4) Индекс работает только с UNIQUE ключами
 
-```java
-@Transactional
-public void updateUser(User user) {
-    repo.save(user);
-    // Транзакция commit
-}
 
-public void notifyUser(User user) {
-    try {
-        sendNotification(user);  // Вне транзакции
-    } catch (Exception e) {
-        log.error("Notification failed", e);
-    }
-}
-
-// Использование
-updateUser(user);
-notifyUser(user);
-```
-
-```java
-@Transactional
-public void updateUser(User user) {
-    repo.save(user);
-    eventPublisher.publishEvent(new UserUpdatedEvent(user));
-}
-
-@Component
-class NotificationListener {
-    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
-    public void handleUserUpdated(UserUpdatedEvent event) {
-        sendNotification(event.getUser());  // Только после успешного commit
-    }
-}
-```
-
-```java
-@Transactional
-public void updateUser(User user) {
-    repo.save(user);
-    notificationService.sendAsync(user);  // Отдельная транзакция
-}
-
-@Service
-class NotificationService {
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void sendAsync(User user) {
-        sendNotification(user);  // Независимая транзакция
-    }
-}
-```
-
-**Ответ: Функция NOW() делает условие нестабильным для планировщика**
+> **Ответ: Функция NOW() делает условие нестабильным для планировщика**
 
 `NOW()` возвращает **текущее время**, которое меняется при каждом выполнении запроса. PostgreSQL не может использовать индекс эффективно, потому что значение `NOW()` **не константа** — оно вычисляется в runtime.
 
@@ -1996,66 +1950,15 @@ SELECT provolatile FROM pg_proc WHERE proname = 'now';
 
 **Вывод: `NOW()` делает условие динамическим → планировщик не может эффективно использовать индекс. Решение — передавать вычисленное значение из приложения.**
 
-```sql
-SELECT * FROM users 
-WHERE created_at >= NOW() - INTERVAL '1 day';
---              ^^^^^^ Динамическое значение!
-```
+## Вопрос №29.
+При использовании parallelStream() над коллекцией из 100 элементов
+производительность стала хуже, чем у обычного stream(). В чем причина?
+1) Создание и координация ForkJoin задач дороже выгоды при малом числе элементов
+2) Коллекция всегда обрабатывается последовательно, это баг JDK
+3) GC хуже справляется с объектами в многопоточной среде
+4) Количество элементов слишком мало, накладные расходы выше пользы
 
-```sql
-EXPLAIN ANALYZE
-SELECT * FROM users 
-WHERE created_at >= NOW() - INTERVAL '1 day';
-```
-
-```plaintext
-Seq Scan on users  (cost=0.00..1234.56 rows=500 width=100)
-  Filter: (created_at >= (now() - '1 day'::interval))
-```
-
-```java
-// Java
-LocalDateTime oneDayAgo = LocalDateTime.now().minusDays(1);
-jdbcTemplate.query(
-    "SELECT * FROM users WHERE created_at >= ?", 
-    oneDayAgo
-);
-```
-
-```sql
--- Теперь это константа для планировщика
-SELECT * FROM users 
-WHERE created_at >= '2025-11-11 10:00:00';
-```
-
-```plaintext
-Index Scan using idx_users_created_at on users
-  Index Cond: (created_at >= '2025-11-11 10:00:00')
-```
-
-```sql
-PREPARE recent_users(timestamp) AS
-SELECT * FROM users WHERE created_at >= $1;
-
-EXECUTE recent_users(NOW() - INTERVAL '1 day');
-```
-
-```sql
--- Индекс только для недавних записей
-CREATE INDEX idx_users_recent 
-ON users(created_at) 
-WHERE created_at >= NOW() - INTERVAL '7 days';
-```
-
-```sql
--- NOW() имеет volatility = STABLE (меняется в рамках транзакции)
-SELECT provolatile FROM pg_proc WHERE proname = 'now';
--- Result: 's' (stable)
-
--- Для оптимизации можно использовать IMMUTABLE функции
-```
-
-**Ответ: Создание и координация ForkJoin задач дороже выгоды при малом числе элементов**
+> **Ответ: Создание и координация ForkJoin задач дороже выгоды при малом числе элементов**
 
 `parallelStream()` использует **ForkJoin framework**, который разбивает работу на подзадачи и распределяет их по потокам. Для **малых коллекций** (100 элементов) **overhead** (накладные расходы) на создание задач, синхронизацию и координацию потоков **превышает выгоду от параллелизма**.
 
@@ -2151,64 +2054,20 @@ ForkJoinPool.commonPool()  // Получение пула (есть cost)
 
 **Вывод: для 100 элементов overhead на ForkJoin (splitting, coordination, merging) превышает выгоду от параллелизма. `parallelStream()` эффективен только на больших объёмах данных с тяжёлыми вычислениями.**
 
-```java
-List<Integer> list = IntStream.range(0, 100).boxed().collect(Collectors.toList());
-
-// Sequential stream
-long start = System.nanoTime();
-list.stream()
-    .map(i -> i * 2)
-    .collect(Collectors.toList());
-long sequential = System.nanoTime() - start;
-
-// Parallel stream
-start = System.nanoTime();
-list.parallelStream()
-    .map(i -> i * 2)
-    .collect(Collectors.toList());
-long parallel = System.nanoTime() - start;
-
-System.out.println("Sequential: " + sequential);
-System.out.println("Parallel: " + parallel);
-// Parallel обычно медленнее для 100 элементов!
+## Вопрос №30
+Есть таблица orders (1 млн строк).
+Запрос:
+```sql
+SELECT * FROM orders WHERE status = 'PAID';
 ```
+Столбец status типа VARCHAR, индекс по нему отсутствует.
+Что сделает PostgreSQL?
+1) Отклонит запрос из-за отсутствия индекса
+2) Выполнит последовательный просмотр всей таблицы (Seq Scan)
+3) Использует хэш-индекс, созданный автоматически
+4) Выполнит бинарный поиск по строковому столбцу
 
-```java
-// Хороший случай для parallel
-List<Integer> bigList = IntStream.range(0, 1_000_000).boxed().toList();
-bigList.parallelStream()
-    .map(i -> expensiveComputation(i))  // Тяжёлая операция
-    .collect(Collectors.toList());
-```
-
-```java
-// 100 элементов, простая операция
-list.stream().map(i -> i * 2)           // ~0.1ms
-list.parallelStream().map(i -> i * 2)   // ~2ms (overhead!)
-
-// 1_000_000 элементов, сложная операция
-bigList.stream().map(i -> complexCalc(i))          // ~1000ms
-bigList.parallelStream().map(i -> complexCalc(i))  // ~250ms (выгода!)
-```
-
-```java
-// Что происходит внутри parallelStream()
-ForkJoinPool.commonPool()  // Получение пула (есть cost)
-    .invoke(
-        new RecursiveTask() {  // Создание задачи
-            protected compute() {
-                if (size < threshold) {
-                    // Базовый случай
-                } else {
-                    fork();  // Разделение на подзадачи (cost!)
-                    join();  // Ожидание и объединение (cost!)
-                }
-            }
-        }
-    );
-```
-
-**Ответ: Выполнит последовательный просмотр всей таблицы (Seq Scan)**
+> **Ответ: Выполнит последовательный просмотр всей таблицы (Seq Scan)**
 
 Без индекса на колонке `status` PostgreSQL вынужден **просканировать все 1 млн строк** последовательно, чтобы найти записи со значением `'PAID'`.
 
@@ -2293,60 +2152,10 @@ SELECT * FROM orders WHERE status = 'PAID';
 
 **Вывод: без индекса PostgreSQL выполнит Seq Scan (полное сканирование таблицы) — 1 млн строк. Создание индекса ускорит запрос в десятки/сотни раз.**
 
-```sql
-SELECT * FROM orders WHERE status = 'PAID';
-```
+## Вопрос 31.
+![Question-Autoboxing](assets/31-question.png)
 
-```plaintext
-EXPLAIN ANALYZE
-SELECT * FROM orders WHERE status = 'PAID';
-
-Seq Scan on orders  (cost=0.00..25000.00 rows=50000 width=100)
-  Filter: (status = 'PAID'::text)
-  Rows Removed by Filter: 950000
-Planning Time: 0.1 ms
-Execution Time: 1234.5 ms  -- МЕДЛЕННО!
-```
-
-```sql
-CREATE INDEX idx_orders_status ON orders(status);
-```
-
-```plaintext
-EXPLAIN ANALYZE
-SELECT * FROM orders WHERE status = 'PAID';
-
-Bitmap Heap Scan on orders  (cost=500.00..5000.00 rows=50000 width=100)
-  Recheck Cond: (status = 'PAID'::text)
-  ->  Bitmap Index Scan on idx_orders_status
-        Index Cond: (status = 'PAID'::text)
-Planning Time: 0.2 ms
-Execution Time: 45.3 ms  -- БЫСТРО!
-```
-
-```sql
--- Индекс только для PAID заказов
-CREATE INDEX idx_orders_paid 
-ON orders(status) 
-WHERE status = 'PAID';
-```
-
-```sql
-CREATE INDEX idx_orders_status ON orders(status);
-```
-
-```sql
--- Быстрее для `=`, но не для диапазонов
-CREATE INDEX idx_orders_status_hash ON orders USING HASH(status);
-```
-
-```sql
--- Убедиться, что индекс используется
-EXPLAIN (ANALYZE, BUFFERS)
-SELECT * FROM orders WHERE status = 'PAID';
-```
-
-**Ответ: Использовать примитивные коллекции (например, IntStream или сторонние библиотеки как Trove, FastUtil)**
+> **Ответ: Использовать примитивные коллекции (например, IntStream или сторонние библиотеки как Trove, FastUtil)**
 
 Автоупаковка `int → Integer` создаёт объекты в heap, что значительно увеличивает потребление памяти. **Примитивные коллекции** избегают этого overhead.
 
@@ -2473,99 +2282,12 @@ int[] array = new int[1_000_000];
 
 **Вывод: примитивные коллекции (Eclipse Collections, Trove, FastUtil) избегают autoboxing и экономят ~90% памяти по сравнению с `List<Integer>`.**
 
-```java
-// С автоупаковкой
-List<Integer> list = new ArrayList<>();
-for (int i = 0; i < 1_000_000; i++) {
-    list.add(i);  // int → Integer (1 млн объектов!)
-}
-// Память: ~40-50 MB
-```
+---
 
-```java
-import org.eclipse.collections.impl.list.mutable.primitive.IntArrayList;
+## Вопрос №32.
+![Question-32](assets/32-question.png)
 
-IntArrayList list = new IntArrayList();
-for (int i = 0; i < 1_000_000; i++) {
-    list.add(i);  // Без boxing!
-}
-// Память: ~4 MB (в 10 раз меньше!)
-```
-
-```java
-import gnu.trove.list.array.TIntArrayList;
-
-TIntArrayList list = new TIntArrayList();
-list.add(42);  // Примитив
-```
-
-```java
-import it.unimi.dsi.fastutil.ints.IntArrayList;
-
-IntArrayList list = new IntArrayList();
-list.add(42);
-```
-
-```java
-int[] array = new int[1_000_000];
-for (int i = 0; i < array.length; i++) {
-    array[i] = i;  // Без boxing
-}
-// Память: ~4 MB
-```
-
-```java
-// Для вычислений без создания коллекции
-int sum = IntStream.range(0, 1_000_000)
-    .filter(i -> i % 2 == 0)
-    .sum();
-```
-
-```java
-// ArrayList<Integer>
-List<Integer> boxed = new ArrayList<>();
-for (int i = 0; i < 1_000_000; i++) {
-    boxed.add(i);
-}
-// ~40-50 MB
-
-// IntArrayList (Eclipse Collections)
-IntArrayList primitive = new IntArrayList();
-for (int i = 0; i < 1_000_000; i++) {
-    primitive.add(i);
-}
-// ~4 MB (в 10 раз меньше!)
-
-// int[]
-int[] array = new int[1_000_000];
-// ~4 MB
-```
-
-```xml
-<dependency>
-    <groupId>org.eclipse.collections</groupId>
-    <artifactId>eclipse-collections</artifactId>
-    <version>11.1.0</version>
-</dependency>
-```
-
-```xml
-<dependency>
-    <groupId>net.sf.trove4j</groupId>
-    <artifactId>trove4j</artifactId>
-    <version>3.0.3</version>
-</dependency>
-```
-
-```xml
-<dependency>
-    <groupId>it.unimi.dsi</groupId>
-    <artifactId>fastutil</artifactId>
-    <version>8.5.12</version>
-</dependency>
-```
-
-**Ответ: Будет выброшено `IllegalStateException: stream has already been operated upon or closed`**
+> **Ответ: Будет выброшено `IllegalStateException: stream has already been operated upon or closed`**
 
 Stream в Java можно использовать **только один раз**. После выполнения терминальной операции (например, `forEach`) stream **закрывается** и больше не может быть использован.
 
